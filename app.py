@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 # both load the same project-root .env file.
 load_dotenv(Path(__file__).resolve().parents[1] / '.env')
 
-from flask import Flask, g, jsonify, request
+from flask import Flask, g, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 from auth import (
@@ -29,6 +29,12 @@ from db import store
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+# --- React build directory ---
+# Adjust this if your build output lives somewhere else (e.g. ../frontend/build)
+BUILD_DIR = (Path(__file__).resolve().parents[1] / 'frontend' / 'build').resolve()
+# If the built index.html isn't there, we'll skip the SPA fallback gracefully.
+SPA_INDEX = BUILD_DIR / 'index.html'
 
 
 def account_public(user):
@@ -194,6 +200,27 @@ def checkout():
 @app.get('/api/account/orders')
 def orders():
     return jsonify({'orders': store.list_orders()})
+
+
+# --- SPA fallback: serve React build for any non-API route ---
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_spa(path):
+    # Never swallow API routes
+    if path.startswith('api/'):
+        return jsonify({'error': 'Not found'}), 404
+
+    # If the requested file exists in the build dir, serve it (js, css, images…)
+    if path:
+        candidate = BUILD_DIR / path
+        if candidate.is_file():
+            return send_from_directory(BUILD_DIR, path)
+
+    # Otherwise fall back to index.html so React Router handles the route
+    if SPA_INDEX.is_file():
+        return send_from_directory(BUILD_DIR, 'index.html')
+
+    return jsonify({'error': 'Frontend build not found. Expected index.html in ' + str(BUILD_DIR)}), 404
 
 
 def uuid_token():
